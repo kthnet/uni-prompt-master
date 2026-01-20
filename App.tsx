@@ -359,7 +359,7 @@ const App: React.FC = () => {
             }`}
           >
             <Cloud size={16} className="mr-2" />
-            공유 라이브러리
+            나의 라이브러리
             {savedPrompts.length > 0 && (
               <span className="ml-2 bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded-full hidden sm:inline-flex">
                 {savedPrompts.length}
