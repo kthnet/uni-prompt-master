@@ -69,6 +69,7 @@ const App: React.FC = () => {
   const [saveTitle, setSaveTitle] = useState('');
   const [saveCategory, setSaveCategory] = useState('기타');
   const [saveContent, setSaveContent] = useState(''); // To edit prompt before saving
+  const [isInputMode, setIsInputMode] = useState(false); // Toggle between Select and Input for category
 
   // Variable Filling State
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
@@ -236,6 +237,12 @@ const App: React.FC = () => {
     }
   }, [activeTab, userInfo]);
 
+  // --- Derived Data for Categories ---
+  const categories = useMemo(() => {
+    const cats = new Set(savedPrompts.map(p => p.category));
+    return ['All', ...Array.from(cats)];
+  }, [savedPrompts]);
+
   // --- Generator Handlers ---
   const handleInputChange = (e: React.ChangeEvent<HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -284,7 +291,17 @@ const App: React.FC = () => {
     requireAuth(() => {
       if (!result) return;
       setSaveTitle('');
-      setSaveCategory('일반');
+      
+      // Smart Logic: If we have existing folders, default to select mode and pick the first one
+      const existingCats = categories.filter(c => c !== 'All');
+      if (existingCats.length > 0) {
+        setSaveCategory(existingCats[0]);
+        setIsInputMode(false);
+      } else {
+        setSaveCategory('일반');
+        setIsInputMode(true);
+      }
+      
       setSaveContent(result.prompt);
       setIsSaveModalOpen(true);
     });
@@ -293,6 +310,10 @@ const App: React.FC = () => {
   const handleSavePrompt = async () => {
     if (!saveTitle.trim()) {
       alert("제목을 입력해주세요.");
+      return;
+    }
+    if (!saveCategory.trim()) {
+      alert("폴더(카테고리) 이름을 입력해주세요.");
       return;
     }
     if (!userInfo) return;
@@ -336,7 +357,7 @@ const App: React.FC = () => {
       alert(`'${userInfo.name}'님의 로컬 저장소에 저장되었습니다. (클라우드 연동 필요)`);
     } else {
       fetchPrompts(); // Refresh IDs
-      alert("클라우드에 안전하게 저장되었습니다!");
+      alert("나의 라이브러리에 안전하게 저장되었습니다!");
     }
   };
 
@@ -372,12 +393,6 @@ const App: React.FC = () => {
     }
     return content;
   };
-
-  // --- Derived Data ---
-  const categories = useMemo(() => {
-    const cats = new Set(savedPrompts.map(p => p.category));
-    return ['All', ...Array.from(cats)];
-  }, [savedPrompts]);
 
   const filteredPrompts = useMemo(() => {
     if (selectedCategory === 'All') return savedPrompts;
@@ -499,17 +514,50 @@ const App: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">폴더 (카테고리)</label>
-                  <input 
-                    type="text" 
-                    value={saveCategory} 
-                    onChange={e => setSaveCategory(e.target.value)}
-                    placeholder="예: 국고사업, 강의준비"
-                    list="category-suggestions"
-                    className="input-premium"
-                  />
-                  <datalist id="category-suggestions">
-                    {categories.filter(c => c !== 'All').map(c => <option key={c} value={c} />)}
-                  </datalist>
+                  {/* Category Selection UI: Toggle between Select and Input */}
+                  {!isInputMode && categories.filter(c => c !== 'All').length > 0 ? (
+                    <div className="relative w-full">
+                      <select 
+                        value={saveCategory} 
+                        onChange={(e) => {
+                            if (e.target.value === '___NEW___') {
+                                setIsInputMode(true);
+                                setSaveCategory(''); // Clear for new input
+                            } else {
+                                setSaveCategory(e.target.value);
+                            }
+                        }}
+                        className="input-premium appearance-none cursor-pointer bg-slate-50"
+                      >
+                        {categories.filter(c => c !== 'All').map(c => (
+                            <option key={c} value={c}>{c}</option>
+                        ))}
+                        <option value="___NEW___" className="font-bold text-indigo-600 bg-indigo-50">+ 새 폴더 만들기 (직접 입력)</option>
+                      </select>
+                      <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-slate-500">
+                        <ChevronRight className="rotate-90 w-4 h-4" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                        <input 
+                            type="text" 
+                            value={saveCategory} 
+                            onChange={e => setSaveCategory(e.target.value)}
+                            placeholder="새 폴더 이름 입력"
+                            className="input-premium"
+                            autoFocus
+                        />
+                        {categories.filter(c => c !== 'All').length > 0 && (
+                            <button 
+                                onClick={() => setIsInputMode(false)}
+                                className="px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg whitespace-nowrap border border-indigo-200 transition-colors"
+                            >
+                                목록 선택
+                            </button>
+                        )}
+                    </div>
+                  )}
                 </div>
               </div>
               
