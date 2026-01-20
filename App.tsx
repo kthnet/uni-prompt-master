@@ -959,21 +959,27 @@ const App: React.FC = () => {
               </button>
             </h3>
             <div className="space-y-1">
-              {categories.map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium flex items-center transition-colors ${
-                    selectedCategory === cat 
-                    ? 'bg-indigo-100 text-indigo-700' 
-                    : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <Folder size={16} className={`mr-2 ${selectedCategory === cat ? 'fill-indigo-300' : ''}`} />
-                  {cat}
-                  {cat === 'All' && <span className="ml-auto text-xs opacity-60">{savedPrompts.length}</span>}
-                </button>
-              ))}
+              {categories.map(cat => {
+                const count = cat === 'All' 
+                  ? savedPrompts.length 
+                  : savedPrompts.filter(p => p.category === cat).length;
+                  
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium flex items-center transition-colors ${
+                      selectedCategory === cat 
+                      ? 'bg-indigo-100 text-indigo-700' 
+                      : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <Folder size={16} className={`mr-2 ${selectedCategory === cat ? 'fill-indigo-300' : ''} shrink-0`} />
+                    <span className="truncate mr-2">{cat}</span>
+                    <span className="ml-auto text-xs opacity-60">{count}</span>
+                  </button>
+                );
+              })}
             </div>
             {/* User Info Card in Sidebar */}
             {userInfo && (
