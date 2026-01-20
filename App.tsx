@@ -71,50 +71,7 @@ const App: React.FC = () => {
   // Check API Key existence (for UX only)
   const hasApiKey = !!process.env.API_KEY;
 
-  // --- Auth Logic ---
-  useEffect(() => {
-    // Check local storage for user info on load
-    const storedUser = localStorage.getItem('uniPromptUser');
-    if (storedUser) {
-      setUserInfo(JSON.parse(storedUser));
-    }
-  }, []);
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!loginForm.name.trim() || !loginForm.email.trim()) {
-      alert("이름과 이메일을 모두 입력해주세요.");
-      return;
-    }
-    const newUser = { name: loginForm.name, email: loginForm.email };
-    setUserInfo(newUser);
-    localStorage.setItem('uniPromptUser', JSON.stringify(newUser));
-    setIsLoginModalOpen(false);
-    
-    // Refresh library if on library tab
-    if (activeTab === 'library') {
-      fetchPrompts(newUser.email);
-    }
-  };
-
-  const handleLogout = () => {
-    if(confirm("로그아웃 하시겠습니까?")) {
-      localStorage.removeItem('uniPromptUser');
-      setUserInfo(null);
-      setSavedPrompts([]);
-      setActiveTab('generate');
-    }
-  };
-
-  const requireAuth = (callback: () => void) => {
-    if (userInfo) {
-      callback();
-    } else {
-      setIsLoginModalOpen(true);
-    }
-  };
-
-  // --- Supabase Logic ---
+  // --- Supabase Logic (Defined before Auth Logic for hoisting) ---
 
   // 1. Fetch Prompts (Read) - User Specific
   const fetchPrompts = async (email?: string) => {
@@ -147,6 +104,52 @@ const App: React.FC = () => {
     setIsLibraryLoading(false);
   };
 
+  // --- Auth Logic ---
+  useEffect(() => {
+    // Check local storage for user info on load
+    const storedUser = localStorage.getItem('uniPromptUser');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      setUserInfo(parsedUser);
+      // Immediately fetch prompts if user exists
+      fetchPrompts(parsedUser.email);
+    }
+  }, []);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginForm.name.trim() || !loginForm.email.trim()) {
+      alert("이름과 이메일을 모두 입력해주세요.");
+      return;
+    }
+    const newUser = { name: loginForm.name, email: loginForm.email };
+    setUserInfo(newUser);
+    localStorage.setItem('uniPromptUser', JSON.stringify(newUser));
+    setIsLoginModalOpen(false);
+    
+    // Always fetch prompts immediately after login to update badge count
+    fetchPrompts(newUser.email);
+    alert(`${newUser.name}님 환영합니다!`);
+  };
+
+  const handleLogout = () => {
+    if(confirm("로그아웃 하시겠습니까?")) {
+      localStorage.removeItem('uniPromptUser');
+      setUserInfo(null);
+      setSavedPrompts([]);
+      setActiveTab('generate');
+    }
+  };
+
+  const requireAuth = (callback: () => void) => {
+    if (userInfo) {
+      callback();
+    } else {
+      setIsLoginModalOpen(true);
+    }
+  };
+
+  // Trigger fetch when tab changes to library (double check)
   useEffect(() => {
     if (activeTab === 'library' && userInfo) {
       fetchPrompts();
@@ -250,7 +253,7 @@ const App: React.FC = () => {
       const updatedLocal = [newPrompt, ...currentLocal];
       localStorage.setItem('uniPromptLibrary', JSON.stringify(updatedLocal));
       
-      alert(`'${userInfo.name}'님의 로컬 저장소에 저장되었습니다.`);
+      alert(`'${userInfo.name}'님의 로컬 저장소에 저장되었습니다. (클라우드 연동 필요)`);
     } else {
       fetchPrompts(); // Refresh IDs
       alert("클라우드에 안전하게 저장되었습니다!");
@@ -824,7 +827,7 @@ const App: React.FC = () => {
                         {userInfo.email}
                     </p>
                     <p className="text-[10px] text-slate-400 mt-2">
-                        개인 라이브러리 사용 중
+                        {isLibraryLoading ? '동기화 중...' : '개인 라이브러리 사용 중'}
                     </p>
                 </div>
             )}
