@@ -526,7 +526,7 @@ const App: React.FC = () => {
                 <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-6"></div>
                 <h3 className="text-lg font-semibold text-slate-800 animate-pulse">Official Guide 적용 중...</h3>
                 <div className="mt-4 space-y-2 text-sm text-slate-500">
-                    <p>Gemini 2.5 is thinking...</p>
+                    <p>Gemini 3 is thinking...</p>
                     <p>Applying Persona (Anthropic)...</p>
                     <p>Structuring Data (Google)...</p>
                 </div>
