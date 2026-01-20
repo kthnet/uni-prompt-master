@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Sparkles, Copy, Lightbulb, Check, GraduationCap, Briefcase, ChevronRight, Wand2, HelpCircle, BookOpen, Bot, Brain, Zap, ExternalLink, Bookmark, Save, Trash2, Folder, Layout, Edit3, X, Play, RefreshCw, Cloud, Smartphone, User, LogOut } from 'lucide-react';
+import { Sparkles, Copy, Lightbulb, Check, GraduationCap, Briefcase, ChevronRight, Wand2, HelpCircle, BookOpen, Bot, Brain, Zap, ExternalLink, Bookmark, Save, Trash2, Folder, Layout, Edit3, X, Play, RefreshCw, Cloud, Smartphone, User, LogOut, Lock, KeyRound } from 'lucide-react';
 import { FormData, GeneratedResult, SavedPrompt, UserInfo } from './types';
 import { generateOptimizedPrompt } from './services/geminiService';
 import { supabase } from './supabaseClient'; // Supabase Client 추가
@@ -42,8 +42,9 @@ const App: React.FC = () => {
   // User Auth State
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [loginForm, setLoginForm] = useState({ name: '', email: '' });
-  const [isCheckingUser, setIsCheckingUser] = useState(false); // 로딩 상태 추가
+  // Login Form State including Password
+  const [loginForm, setLoginForm] = useState({ name: '', email: '', password: '' });
+  const [isCheckingUser, setIsCheckingUser] = useState(false); 
   
   // Pending Action State (For performing actions after login)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
@@ -75,7 +76,7 @@ const App: React.FC = () => {
   // Check API Key existence (for UX only)
   const hasApiKey = !!process.env.API_KEY;
 
-  // --- Supabase Logic (Defined before Auth Logic for hoisting) ---
+  // --- Supabase Logic ---
 
   // 1. Fetch Prompts (Read) - User Specific
   const fetchPrompts = async (email?: string) => {
@@ -108,65 +109,101 @@ const App: React.FC = () => {
     setIsLibraryLoading(false);
   };
 
-  // --- Auth Logic ---
+  // --- Auth Logic (Updated for Encryption) ---
   useEffect(() => {
     // Check local storage for user info on load
     const storedUser = localStorage.getItem('uniPromptUser');
     if (storedUser) {
       const parsedUser = JSON.parse(storedUser);
       setUserInfo(parsedUser);
-      // Immediately fetch prompts if user exists
       fetchPrompts(parsedUser.email);
     }
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginForm.name.trim() || !loginForm.email.trim()) {
-      alert("이름과 이메일을 모두 입력해주세요.");
+    if (!loginForm.email.trim() || !loginForm.password.trim()) {
+      alert("이메일과 비밀번호를 입력해주세요.");
       return;
     }
 
     setIsCheckingUser(true);
-    let finalName = loginForm.name;
 
-    // --- Duplicate Check Logic (Method B) ---
     try {
-      // Supabase에서 해당 이메일로 작성된 최신 글 하나를 가져와서 이름을 확인
-      const { data, error } = await supabase
-        .from('prompts')
-        .select('user_name')
-        .eq('user_email', loginForm.email)
-        .limit(1);
+      // 1. Check if user exists (only by email) to decide Login vs Signup flow
+      // We don't fetch the password here anymore for security
+      const { data: existingUsers, error: checkError } = await supabase
+        .from('users')
+        .select('email')
+        .eq('email', loginForm.email)
+        .maybeSingle();
 
-      if (data && data.length > 0) {
-        const existingName = data[0].user_name;
-        // 기존 이름이 있고, 지금 입력한 이름과 다르다면
-        if (existingName && existingName !== loginForm.name) {
-          const agree = window.confirm(
-            `이 이메일은 이미 '${existingName}'님의 명의로 사용된 기록이 있습니다.\n\n기존 사용자 '${existingName}'님으로 로그인하시겠습니까?\n(취소 시 현재 입력한 이름으로 로그인됩니다.)`
-          );
-          if (agree) {
-            finalName = existingName;
-          }
-        }
+      if (checkError && checkError.message.includes("Supabase not configured")) {
+         throw checkError;
       }
-    } catch (err) {
-      console.warn("User check skipped (offline or error)", err);
+
+      if (existingUsers) {
+        // --- EXISTING USER: LOGIN (Secure RPC) ---
+        // Call the 'login_user' RPC function in Supabase
+        const { data: user, error } = await supabase.rpc('login_user', {
+          check_email: loginForm.email,
+          check_password: loginForm.password
+        });
+
+        if (error || !user || user.length === 0) {
+          alert("비밀번호가 일치하지 않습니다.\n(또는 암호화되지 않은 구버전 계정일 수 있습니다)");
+          setIsCheckingUser(false);
+          return;
+        }
+
+        // Login Success
+        const loggedUser = user[0] as UserInfo; // RPC returns array
+        completeLogin(loggedUser);
+        alert(`${loggedUser.name}님, 환영합니다!`);
+
+      } else {
+        // --- NEW USER: SIGNUP (Secure RPC) ---
+        if (!loginForm.name.trim()) {
+          alert("신규 가입을 위해 이름을 입력해주세요.");
+          setIsCheckingUser(false);
+          return;
+        }
+
+        // Call the 'register_user' RPC function
+        const { error: insertError } = await supabase.rpc('register_user', {
+            new_email: loginForm.email,
+            new_name: loginForm.name,
+            new_password: loginForm.password
+        });
+
+        if (insertError) {
+          console.error("Signup failed:", insertError);
+          alert("회원가입 중 오류가 발생했습니다. (SQL 설정인 'register_user' 함수가 있는지 확인해주세요)");
+          setIsCheckingUser(false);
+          return;
+        }
+
+        const loggedUser = { name: loginForm.name, email: loginForm.email };
+        completeLogin(loggedUser);
+        alert(`환영합니다, ${loginForm.name}님! 안전하게 암호화되어 가입되었습니다.`);
+      }
+
+    } catch (err: any) {
+      console.warn("Auth process fallback (Supabase offline/error)", err);
+      const loggedUser = { name: loginForm.name, email: loginForm.email };
+      completeLogin(loggedUser);
+      alert("오프라인 모드(로컬)로 로그인되었습니다. (서버 연결 실패)");
     } finally {
        setIsCheckingUser(false);
     }
+  };
 
-    const newUser = { name: finalName, email: loginForm.email };
-    setUserInfo(newUser);
-    localStorage.setItem('uniPromptUser', JSON.stringify(newUser));
+  const completeLogin = (user: UserInfo) => {
+    setUserInfo(user);
+    localStorage.setItem('uniPromptUser', JSON.stringify(user));
     setIsLoginModalOpen(false);
+    fetchPrompts(user.email);
     
-    // Always fetch prompts immediately after login to update badge count
-    fetchPrompts(newUser.email);
-    alert(`${newUser.name}님 환영합니다!`);
-
-    // Execute pending action if exists (e.g., Open Save Modal)
     if (pendingAction) {
         pendingAction();
         setPendingAction(null);
@@ -178,6 +215,7 @@ const App: React.FC = () => {
       localStorage.removeItem('uniPromptUser');
       setUserInfo(null);
       setSavedPrompts([]);
+      setLoginForm({ name: '', email: '', password: '' });
       setActiveTab('generate');
     }
   };
@@ -186,13 +224,12 @@ const App: React.FC = () => {
     if (userInfo) {
       callback();
     } else {
-      // Store the callback to execute after login
       setPendingAction(() => callback);
       setIsLoginModalOpen(true);
     }
   };
 
-  // Trigger fetch when tab changes to library (double check)
+  // Trigger fetch when tab changes to library
   useEffect(() => {
     if (activeTab === 'library' && userInfo) {
       fetchPrompts();
@@ -367,28 +404,31 @@ const App: React.FC = () => {
             
             <div className="text-center mb-8">
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-100 mb-4">
-                <User size={32} className="text-indigo-600" />
+                <Lock size={32} className="text-indigo-600" />
               </div>
-              <h3 className="text-2xl font-bold text-slate-800">간편 본인 확인</h3>
+              <h3 className="text-2xl font-bold text-slate-800">로그인 및 본인 확인</h3>
               <p className="text-slate-500 mt-2 text-sm break-keep">
-                나만의 라이브러리를 관리하기 위해<br/>최초 1회 정보를 입력해주세요. (비밀번호 없음)
+                개인 라이브러리 보호를 위해<br/>간단한 비밀번호를 설정하여 사용합니다.
               </p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">이름</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-1 flex items-center">
+                    <User size={14} className="mr-1"/> 이름
+                </label>
                 <input 
                   type="text" 
                   value={loginForm.name}
                   onChange={e => setLoginForm(prev => ({...prev, name: e.target.value}))}
-                  placeholder="예: 김교수"
+                  placeholder="예: 김교수 (신규 가입 시 사용)"
                   className="input-premium"
-                  autoFocus
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">이메일</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-1 flex items-center">
+                    <Cloud size={14} className="mr-1"/> 이메일
+                </label>
                 <input 
                   type="email" 
                   value={loginForm.email}
@@ -396,10 +436,24 @@ const App: React.FC = () => {
                   placeholder="예: prof@univ.ac.kr"
                   className="input-premium"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1 flex items-center">
+                    <KeyRound size={14} className="mr-1"/> 비밀번호
+                </label>
+                <input 
+                  type="password" 
+                  value={loginForm.password}
+                  onChange={e => setLoginForm(prev => ({...prev, password: e.target.value}))}
+                  placeholder="비밀번호 4자리 이상"
+                  className="input-premium"
+                  autoComplete="current-password"
+                />
                 <p className="text-xs text-slate-400 mt-1">
-                  * 이메일은 저장된 데이터를 불러오는 고유 키로 사용됩니다.
+                  * 최초 입력 시 자동으로 안전하게 암호화되어 가입됩니다.
                 </p>
               </div>
+              
               <button 
                 type="submit" 
                 disabled={isCheckingUser}
@@ -411,7 +465,7 @@ const App: React.FC = () => {
                         확인 중...
                     </>
                 ) : (
-                    "확인 및 시작하기"
+                    "시작하기 (로그인/가입)"
                 )}
               </button>
             </form>
