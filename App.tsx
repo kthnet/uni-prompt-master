@@ -381,7 +381,7 @@ const App: React.FC = () => {
               <span className="bg-indigo-100 p-2 rounded-lg mr-3 text-indigo-600">
                 <Briefcase size={20} />
               </span>
-              프롬프트 설계 설정
+              프롬프트 초안 작성
             </h2>
 
             {/* API Key Warning for Development */}
