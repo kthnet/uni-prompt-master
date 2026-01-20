@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Sparkles, Copy, Lightbulb, Check, GraduationCap, Briefcase, ChevronRight, Wand2, HelpCircle, BookOpen, Bot, Brain, Zap, ExternalLink, Bookmark, Save, Trash2, Folder, Layout, Edit3, X, Play, RefreshCw, Cloud, Smartphone } from 'lucide-react';
-import { FormData, GeneratedResult, SavedPrompt } from './types';
+import { Sparkles, Copy, Lightbulb, Check, GraduationCap, Briefcase, ChevronRight, Wand2, HelpCircle, BookOpen, Bot, Brain, Zap, ExternalLink, Bookmark, Save, Trash2, Folder, Layout, Edit3, X, Play, RefreshCw, Cloud, Smartphone, User, LogOut } from 'lucide-react';
+import { FormData, GeneratedResult, SavedPrompt, UserInfo } from './types';
 import { generateOptimizedPrompt } from './services/geminiService';
 import { supabase } from './supabaseClient'; // Supabase Client 추가
 
@@ -39,6 +39,11 @@ const App: React.FC = () => {
   // Tabs: 'generate' | 'library'
   const [activeTab, setActiveTab] = useState<'generate' | 'library'>('generate');
 
+  // User Auth State
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginForm, setLoginForm] = useState({ name: '', email: '' });
+
   // Generator State
   const [formData, setFormData] = useState<FormData>({
     role: 'PROFESSOR',
@@ -66,22 +71,73 @@ const App: React.FC = () => {
   // Check API Key existence (for UX only)
   const hasApiKey = !!process.env.API_KEY;
 
+  // --- Auth Logic ---
+  useEffect(() => {
+    // Check local storage for user info on load
+    const storedUser = localStorage.getItem('uniPromptUser');
+    if (storedUser) {
+      setUserInfo(JSON.parse(storedUser));
+    }
+  }, []);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginForm.name.trim() || !loginForm.email.trim()) {
+      alert("이름과 이메일을 모두 입력해주세요.");
+      return;
+    }
+    const newUser = { name: loginForm.name, email: loginForm.email };
+    setUserInfo(newUser);
+    localStorage.setItem('uniPromptUser', JSON.stringify(newUser));
+    setIsLoginModalOpen(false);
+    
+    // Refresh library if on library tab
+    if (activeTab === 'library') {
+      fetchPrompts(newUser.email);
+    }
+  };
+
+  const handleLogout = () => {
+    if(confirm("로그아웃 하시겠습니까?")) {
+      localStorage.removeItem('uniPromptUser');
+      setUserInfo(null);
+      setSavedPrompts([]);
+      setActiveTab('generate');
+    }
+  };
+
+  const requireAuth = (callback: () => void) => {
+    if (userInfo) {
+      callback();
+    } else {
+      setIsLoginModalOpen(true);
+    }
+  };
+
   // --- Supabase Logic ---
 
-  // 1. Fetch Prompts (Read)
-  const fetchPrompts = async () => {
+  // 1. Fetch Prompts (Read) - User Specific
+  const fetchPrompts = async (email?: string) => {
+    const targetEmail = email || userInfo?.email;
+    if (!targetEmail) return;
+
     setIsLibraryLoading(true);
+    
+    // Select prompts where user_email matches
     const { data, error } = await supabase
       .from('prompts')
       .select('*')
+      .eq('user_email', targetEmail) 
       .order('created_at', { ascending: false });
 
     if (error) {
       console.warn('Supabase fetch failed (or not configured), using localStorage:', error.message);
-      // Fallback: If Supabase fails (e.g., config missing), try localStorage for demo purposes
+      // Fallback: Use LocalStorage with email filtering
       const local = localStorage.getItem('uniPromptLibrary');
       if (local) {
-        setSavedPrompts(JSON.parse(local));
+        const allLocalPrompts: SavedPrompt[] = JSON.parse(local);
+        const myPrompts = allLocalPrompts.filter(p => p.user_email === targetEmail);
+        setSavedPrompts(myPrompts);
       } else {
         setSavedPrompts([]);
       }
@@ -92,8 +148,10 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchPrompts();
-  }, []);
+    if (activeTab === 'library' && userInfo) {
+      fetchPrompts();
+    }
+  }, [activeTab, userInfo]);
 
   // --- Generator Handlers ---
   const handleInputChange = (e: React.ChangeEvent<HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -140,11 +198,13 @@ const App: React.FC = () => {
 
   // --- Library & Save Handlers ---
   const openSaveModal = () => {
-    if (!result) return;
-    setSaveTitle('');
-    setSaveCategory('일반');
-    setSaveContent(result.prompt);
-    setIsSaveModalOpen(true);
+    requireAuth(() => {
+      if (!result) return;
+      setSaveTitle('');
+      setSaveCategory('일반');
+      setSaveContent(result.prompt);
+      setIsSaveModalOpen(true);
+    });
   };
 
   const handleSavePrompt = async () => {
@@ -152,56 +212,53 @@ const App: React.FC = () => {
       alert("제목을 입력해주세요.");
       return;
     }
+    if (!userInfo) return;
 
     const vars = extractVariables(saveContent);
-    // Create prompt object with ID and Timestamp for LocalStorage compatibility
     const tempId = crypto.randomUUID();
-    const newPrompt = {
+    
+    // Data structure including user info
+    const promptPayload = {
       title: saveTitle,
       category: saveCategory,
       content: saveContent,
       variables: vars,
-      created_at: new Date().toISOString()
+      user_email: userInfo.email,
+      user_name: userInfo.name,
     };
     
-    const promptForSupabase = {
-      title: saveTitle,
-      category: saveCategory,
-      content: saveContent,
-      variables: vars,
-      // created_at and id are usually handled by DB, but we send payload without them for insert if using defaults,
-      // or we can just send what we have if schema allows.
+    const newPrompt: SavedPrompt = {
+      ...promptPayload,
+      id: tempId,
+      created_at: new Date().toISOString()
     };
 
-    // Optimistic UI Update (Shows immediately)
-    const tempPrompt = { ...newPrompt, id: tempId };
-    setSavedPrompts(prev => [tempPrompt as any, ...prev]);
+    // Optimistic UI Update
+    setSavedPrompts(prev => [newPrompt, ...prev]);
     setIsSaveModalOpen(false);
 
     // Write to Supabase
     const { error } = await supabase
       .from('prompts')
-      .insert([promptForSupabase]);
+      .insert([promptPayload]);
 
     if (error) {
       console.warn('Supabase save failed, falling back to LocalStorage:', error.message);
       
-      // LocalStorage Fallback Logic
+      // LocalStorage Fallback (Append to global array)
       const currentLocal = JSON.parse(localStorage.getItem('uniPromptLibrary') || '[]');
-      const updatedLocal = [tempPrompt, ...currentLocal];
+      const updatedLocal = [newPrompt, ...currentLocal];
       localStorage.setItem('uniPromptLibrary', JSON.stringify(updatedLocal));
       
-      alert("클라우드 연동에 실패하여 '내 컴퓨터(로컬)'에 저장되었습니다.");
+      alert(`'${userInfo.name}'님의 로컬 저장소에 저장되었습니다.`);
     } else {
-      // Refresh to get the real ID from DB
-      fetchPrompts();
-      alert("클라우드(Supabase)에 안전하게 저장되었습니다!");
+      fetchPrompts(); // Refresh IDs
+      alert("클라우드에 안전하게 저장되었습니다!");
     }
   };
 
   const handleDeletePrompt = async (id: string) => {
     if (window.confirm("정말 삭제하시겠습니까?")) {
-      // Optimistic UI Update
       setSavedPrompts(prev => prev.filter(p => p.id !== id));
 
       const { error } = await supabase
@@ -211,7 +268,6 @@ const App: React.FC = () => {
 
       if (error) {
         console.warn('Supabase delete failed, falling back to LocalStorage');
-        // LocalStorage Fallback Logic
         const currentLocal = JSON.parse(localStorage.getItem('uniPromptLibrary') || '[]');
         const updatedLocal = currentLocal.filter((p: any) => p.id !== id);
         localStorage.setItem('uniPromptLibrary', JSON.stringify(updatedLocal));
@@ -248,6 +304,61 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-mesh py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative font-sans">
+      
+      {/* Login Modal */}
+      {isLoginModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm fade-in">
+          <div className="glass-card-strong w-full max-w-md p-8 relative shadow-2xl">
+            <button 
+              onClick={() => setIsLoginModalOpen(false)} 
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X size={24} />
+            </button>
+            
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-100 mb-4">
+                <User size={32} className="text-indigo-600" />
+              </div>
+              <h3 className="text-2xl font-bold text-slate-800">간편 본인 확인</h3>
+              <p className="text-slate-500 mt-2 text-sm break-keep">
+                나만의 라이브러리를 관리하기 위해<br/>최초 1회 정보를 입력해주세요. (비밀번호 없음)
+              </p>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">이름</label>
+                <input 
+                  type="text" 
+                  value={loginForm.name}
+                  onChange={e => setLoginForm(prev => ({...prev, name: e.target.value}))}
+                  placeholder="예: 김교수"
+                  className="input-premium"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">이메일</label>
+                <input 
+                  type="email" 
+                  value={loginForm.email}
+                  onChange={e => setLoginForm(prev => ({...prev, email: e.target.value}))}
+                  placeholder="예: prof@univ.ac.kr"
+                  className="input-premium"
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  * 이메일은 저장된 데이터를 불러오는 고유 키로 사용됩니다.
+                </p>
+              </div>
+              <button type="submit" className="btn-gradient w-full mt-4">
+                확인 및 시작하기
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Save Modal */}
       {isSaveModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in overflow-y-auto">
@@ -317,7 +428,22 @@ const App: React.FC = () => {
 
       {/* Main App Layout */}
       {/* Header */}
-      <header className="mb-6 md:mb-8 text-center px-2">
+      <header className="mb-6 md:mb-8 text-center px-2 relative">
+        {userInfo && (
+          <div className="absolute top-0 right-0 hidden md:flex items-center space-x-2 animate-fadeIn">
+            <span className="text-sm text-slate-600 font-medium bg-white/50 px-3 py-1 rounded-full border border-slate-200">
+              👋 안녕하세요, <span className="text-indigo-600 font-bold">{userInfo.name}</span>님
+            </span>
+            <button 
+              onClick={handleLogout} 
+              className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+              title="로그아웃"
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
+        )}
+        
         <div className="flex justify-center mb-4">
            <div className="glass-card px-3 py-1 md:px-4 md:py-1.5 rounded-full flex items-center space-x-2">
             <span className="relative flex h-3 w-3">
@@ -351,7 +477,9 @@ const App: React.FC = () => {
             프롬프트 생성
           </button>
           <button
-            onClick={() => setActiveTab('library')}
+            onClick={() => {
+              requireAuth(() => setActiveTab('library'));
+            }}
             className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
               activeTab === 'library' 
               ? 'bg-white text-indigo-600 shadow-md ring-1 ring-black/5' 
@@ -660,7 +788,7 @@ const App: React.FC = () => {
             <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 px-2 flex justify-between items-center">
               Folders
               <button 
-                onClick={fetchPrompts} 
+                onClick={() => fetchPrompts()} 
                 disabled={isLibraryLoading}
                 className="text-indigo-500 hover:bg-indigo-50 p-1 rounded-full transition-colors"
                 title="새로고침"
@@ -685,17 +813,21 @@ const App: React.FC = () => {
                 </button>
               ))}
             </div>
-            {/* Mobile Device Info */}
-            <div className="mt-8 text-center p-4 bg-indigo-50/50 rounded-lg border border-indigo-50">
-                <div className="flex justify-center mb-2 text-indigo-300">
-                    <Smartphone size={24} />
-                    <Cloud size={24} className="-ml-2" />
+            {/* User Info Card in Sidebar */}
+            {userInfo && (
+                <div className="mt-8 text-center p-4 bg-indigo-50/50 rounded-lg border border-indigo-50">
+                    <div className="flex justify-center mb-2 text-indigo-300">
+                        <User size={24} />
+                    </div>
+                    <p className="text-xs font-bold text-indigo-800">{userInfo.name}님</p>
+                    <p className="text-[10px] text-slate-400 leading-tight mt-1 truncate">
+                        {userInfo.email}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-2">
+                        개인 라이브러리 사용 중
+                    </p>
                 </div>
-                <p className="text-[10px] text-slate-400 leading-tight">
-                    나의 프롬프트 정상 저장 중<br/>
-                    (연결 실패 시 로컬에 저장)
-                </p>
-            </div>
+            )}
           </div>
 
           {/* Main List */}
@@ -703,12 +835,14 @@ const App: React.FC = () => {
             {isLibraryLoading ? (
                 <div className="text-center py-20 text-slate-400 flex flex-col items-center">
                     <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mb-3"></div>
-                    <p>클라우드에서 불러오는 중...</p>
+                    <p>라이브러리 동기화 중...</p>
                 </div>
             ) : filteredPrompts.length === 0 ? (
                 <div className="glass-card p-10 text-center text-slate-400">
                     <Cloud className="mx-auto mb-3 opacity-50" size={48} />
-                    <p>저장된 프롬프트가 없습니다.</p>
+                    <p>
+                      {userInfo ? `${userInfo.name}님의 저장된 프롬프트가 없습니다.` : "저장된 프롬프트가 없습니다."}
+                    </p>
                     <button onClick={() => setActiveTab('generate')} className="text-indigo-600 hover:underline mt-2 text-sm">
                         생성하러 가기
                     </button>
