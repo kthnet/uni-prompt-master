@@ -20,11 +20,18 @@ export interface FormData {
   context: string;
 }
 
+export interface UserInfo {
+  name: string;
+  email: string;
+}
+
 export interface SavedPrompt {
   id: string;
   title: string;
   category: string;
   content: string; // The raw content with {variables}
   variables: string[]; // Extracted variable names
-  created_at?: string; // Supabase timestamp field (optional for local creation)
+  created_at?: string; // Supabase timestamp field
+  user_email?: string; // Owner's email
+  user_name?: string; // Owner's name
 }
