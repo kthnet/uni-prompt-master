@@ -43,6 +43,9 @@ const App: React.FC = () => {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ name: '', email: '' });
+  
+  // Pending Action State (For performing actions after login)
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 
   // Generator State
   const [formData, setFormData] = useState<FormData>({
@@ -130,6 +133,12 @@ const App: React.FC = () => {
     // Always fetch prompts immediately after login to update badge count
     fetchPrompts(newUser.email);
     alert(`${newUser.name}님 환영합니다!`);
+
+    // Execute pending action if exists (e.g., Open Save Modal)
+    if (pendingAction) {
+        pendingAction();
+        setPendingAction(null);
+    }
   };
 
   const handleLogout = () => {
@@ -145,6 +154,8 @@ const App: React.FC = () => {
     if (userInfo) {
       callback();
     } else {
+      // Store the callback to execute after login
+      setPendingAction(() => callback);
       setIsLoginModalOpen(true);
     }
   };
@@ -313,7 +324,10 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm fade-in">
           <div className="glass-card-strong w-full max-w-md p-8 relative shadow-2xl">
             <button 
-              onClick={() => setIsLoginModalOpen(false)} 
+              onClick={() => {
+                setIsLoginModalOpen(false);
+                setPendingAction(null); // Cancel pending action on close
+              }} 
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
             >
               <X size={24} />
