@@ -692,7 +692,7 @@ const App: React.FC = () => {
                     <Cloud size={24} className="-ml-2" />
                 </div>
                 <p className="text-[10px] text-slate-400 leading-tight">
-                    Supabase 클라우드 연동 중<br/>
+                    나의 프롬프트 정상 저장 중<br/>
                     (연결 실패 시 로컬에 저장)
                 </p>
             </div>
