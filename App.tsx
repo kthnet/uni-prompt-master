@@ -43,6 +43,7 @@ const App: React.FC = () => {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ name: '', email: '' });
+  const [isCheckingUser, setIsCheckingUser] = useState(false); // 로딩 상태 추가
   
   // Pending Action State (For performing actions after login)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
@@ -119,13 +120,44 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginForm.name.trim() || !loginForm.email.trim()) {
       alert("이름과 이메일을 모두 입력해주세요.");
       return;
     }
-    const newUser = { name: loginForm.name, email: loginForm.email };
+
+    setIsCheckingUser(true);
+    let finalName = loginForm.name;
+
+    // --- Duplicate Check Logic (Method B) ---
+    try {
+      // Supabase에서 해당 이메일로 작성된 최신 글 하나를 가져와서 이름을 확인
+      const { data, error } = await supabase
+        .from('prompts')
+        .select('user_name')
+        .eq('user_email', loginForm.email)
+        .limit(1);
+
+      if (data && data.length > 0) {
+        const existingName = data[0].user_name;
+        // 기존 이름이 있고, 지금 입력한 이름과 다르다면
+        if (existingName && existingName !== loginForm.name) {
+          const agree = window.confirm(
+            `이 이메일은 이미 '${existingName}'님의 명의로 사용된 기록이 있습니다.\n\n기존 사용자 '${existingName}'님으로 로그인하시겠습니까?\n(취소 시 현재 입력한 이름으로 로그인됩니다.)`
+          );
+          if (agree) {
+            finalName = existingName;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("User check skipped (offline or error)", err);
+    } finally {
+       setIsCheckingUser(false);
+    }
+
+    const newUser = { name: finalName, email: loginForm.email };
     setUserInfo(newUser);
     localStorage.setItem('uniPromptUser', JSON.stringify(newUser));
     setIsLoginModalOpen(false);
@@ -368,8 +400,19 @@ const App: React.FC = () => {
                   * 이메일은 저장된 데이터를 불러오는 고유 키로 사용됩니다.
                 </p>
               </div>
-              <button type="submit" className="btn-gradient w-full mt-4">
-                확인 및 시작하기
+              <button 
+                type="submit" 
+                disabled={isCheckingUser}
+                className="btn-gradient w-full mt-4"
+              >
+                {isCheckingUser ? (
+                    <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></span>
+                        확인 중...
+                    </>
+                ) : (
+                    "확인 및 시작하기"
+                )}
               </button>
             </form>
           </div>
